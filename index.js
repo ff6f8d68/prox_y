@@ -10,6 +10,11 @@ const PORT = process.env.PORT || 3000;
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public'))); // Serve frontend files
 
+// Test route
+app.get('/test', (req, res) => {
+  res.send('test worked!');
+});
+
 // Initialize the browser and page for rendering
 let browser;
 let page;
@@ -23,7 +28,7 @@ const startBrowser = async (url) => {
   await page.goto(url, { waitUntil: 'networkidle2' });
 };
 
-// API to start the browser session
+// POST API to start the browser session
 app.post('/start', async (req, res) => {
   const { url } = req.body;
   if (!url) {
@@ -33,7 +38,7 @@ app.post('/start', async (req, res) => {
   res.json({ message: 'Browser session started' });
 });
 
-// API to get a screenshot
+// POST API to get a screenshot
 app.post('/screenshot', async (req, res) => {
   if (!page) {
     return res.status(400).json({ error: 'Browser session not started' });
@@ -42,7 +47,7 @@ app.post('/screenshot', async (req, res) => {
   res.json({ screenshot });
 });
 
-// API to handle mouse events
+// POST API to handle mouse events
 app.post('/input', async (req, res) => {
   if (!page) {
     return res.status(400).json({ error: 'Browser session not started' });
