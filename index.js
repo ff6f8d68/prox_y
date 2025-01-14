@@ -1,12 +1,17 @@
 const puppeteer = require('puppeteer');
 const express = require('express');
 const path = require('path');
+const { v4: uuidv4 } = require('uuid'); // To generate unique session IDs
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// To hold active browser sessions for each client
+const sessions = {};
+
 // Serve frontend files
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());  // to parse JSON bodies
 
 // Test route
 app.get('/test', (req, res) => {
@@ -14,16 +19,15 @@ app.get('/test', (req, res) => {
 });
 
 // Initialize the browser and page for rendering
-let browser;
-let page;
-
 const startBrowser = async (url) => {
-  browser = await puppeteer.launch({
+  const browser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
-  page = await browser.newPage();
+  const page = await browser.newPage();
   await page.goto(url, { waitUntil: 'networkidle2' });
+
+  return { browser, page };
 };
 
 // Route to start browser session using GET arguments
@@ -32,25 +36,38 @@ app.get('/start', async (req, res) => {
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
   }
-  await startBrowser(url);
-  res.json({ message: 'Browser session started' });
+
+  // Create a unique session ID for this client
+  const sessionId = uuidv4();
+  
+  const { browser, page } = await startBrowser(url);
+  
+  // Store the session for later use
+  sessions[sessionId] = { browser, page };
+
+  res.json({ message: 'Browser session started', sessionId });
 });
 
-// Route to fetch screenshot using GET method
+// Route to fetch screenshot using GET method for a specific session
 app.get('/screenshot', async (req, res) => {
-  if (!page) {
-    return res.status(400).json({ error: 'Browser session not started' });
+  const { sessionId } = req.query;
+  if (!sessionId || !sessions[sessionId]) {
+    return res.status(400).json({ error: 'Invalid session ID' });
   }
+
+  const { page } = sessions[sessionId];
   const screenshot = await page.screenshot({ encoding: 'base64' });
   res.json({ screenshot });
 });
 
-// Route to handle mouse and keyboard inputs using POST method
+// Route to handle mouse and keyboard inputs using POST method for a specific session
 app.post('/input', async (req, res) => {
-  const { event, data } = req.body;
-  if (!page) {
-    return res.status(400).json({ error: 'Browser session not started' });
+  const { sessionId, event, data } = req.body;
+  if (!sessionId || !sessions[sessionId]) {
+    return res.status(400).json({ error: 'Invalid session ID' });
   }
+
+  const { page } = sessions[sessionId];
 
   if (event === 'mousemove') {
     const { x, y } = data;
@@ -67,6 +84,20 @@ app.post('/input', async (req, res) => {
   }
 
   res.json({ message: 'Input event processed' });
+});
+
+// Route to stop browser session for a specific session
+app.get('/stop', (req, res) => {
+  const { sessionId } = req.query;
+  if (!sessionId || !sessions[sessionId]) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  const { browser } = sessions[sessionId];
+  browser.close();
+  delete sessions[sessionId];
+
+  res.json({ message: 'Session closed' });
 });
 
 // Start the Express server
