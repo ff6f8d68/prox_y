@@ -1,71 +1,72 @@
 const puppeteer = require('puppeteer');
-const WebSocket = require('ws');
 const express = require('express');
+const bodyParser = require('body-parser');
+const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 3000;
 
-// Serve WebSocket for streaming and input
-const server = app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
-});
-const wss = new WebSocket.Server({ server });
+// Middleware to parse JSON requests
+app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, 'public'))); // Serve frontend files
 
-// Puppeteer setup
+// Initialize the browser and page for rendering
+let browser;
+let page;
+
 const startBrowser = async (url) => {
-  const browser = await puppeteer.launch({
+  browser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
-  const page = await browser.newPage();
+  page = await browser.newPage();
   await page.goto(url, { waitUntil: 'networkidle2' });
-
-  return { browser, page };
 };
 
-wss.on('connection', async (ws) => {
-  console.log('Client connected');
+// API to start the browser session
+app.post('/start', async (req, res) => {
+  const { url } = req.body;
+  if (!url) {
+    return res.status(400).json({ error: 'URL is required' });
+  }
+  await startBrowser(url);
+  res.json({ message: 'Browser session started' });
+});
 
-  ws.on('message', async (message) => {
-    const data = JSON.parse(message);
+// API to get a screenshot
+app.post('/screenshot', async (req, res) => {
+  if (!page) {
+    return res.status(400).json({ error: 'Browser session not started' });
+  }
+  const screenshot = await page.screenshot({ encoding: 'base64' });
+  res.json({ screenshot });
+});
 
-    if (data.type === 'start') {
-      const { url } = data;
-      const { browser, page } = await startBrowser(url);
+// API to handle mouse events
+app.post('/input', async (req, res) => {
+  if (!page) {
+    return res.status(400).json({ error: 'Browser session not started' });
+  }
 
-      // Stream screenshots to client
-      const interval = setInterval(async () => {
-        if (ws.readyState === WebSocket.OPEN) {
-          const screenshot = await page.screenshot({ encoding: 'base64' });
-          ws.send(JSON.stringify({ type: 'image', screenshot }));
-        } else {
-          clearInterval(interval);
-          await browser.close();
-        }
-      }, 100); // Stream at ~10 FPS
+  const { event, data } = req.body;
+  if (event === 'mousemove') {
+    const { x, y } = data;
+    await page.mouse.move(x, y);
+  } else if (event === 'click') {
+    const { x, y } = data;
+    await page.mouse.click(x, y);
+  } else if (event === 'keydown') {
+    const { key } = data;
+    await page.keyboard.down(key);
+  } else if (event === 'keyup') {
+    const { key } = data;
+    await page.keyboard.up(key);
+  }
 
-      // Handle user inputs
-      ws.on('message', async (inputMessage) => {
-        const inputData = JSON.parse(inputMessage);
+  res.json({ message: 'Input event processed' });
+});
 
-        if (inputData.type === 'input') {
-          const { event, data } = inputData;
-
-          if (event === 'mousemove') {
-            const { x, y } = data;
-            await page.mouse.move(x, y);
-          } else if (event === 'click') {
-            const { x, y } = data;
-            await page.mouse.click(x, y);
-          } else if (event === 'keydown') {
-            const { key } = data;
-            await page.keyboard.down(key);
-          } else if (event === 'keyup') {
-            const { key } = data;
-            await page.keyboard.up(key);
-          }
-        }
-      });
-    }
-  });
+// Start the Express server
+app.listen(PORT, () => {
+  console.log(`Server listening on https://localhost:${PORT}`);
 });
