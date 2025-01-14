@@ -6,101 +6,134 @@ const { v4: uuidv4 } = require('uuid'); // To generate unique session IDs
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// To hold active browser sessions for each client
+// Store active sessions and pre-launched browser
 const sessions = {};
+let browser;
 
-// Serve frontend files
+// Middleware
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json());  // to parse JSON bodies
+app.use(express.json());
+
+// Launch the browser at startup
+(async () => {
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    console.log('Browser launched at server startup.');
+  } catch (error) {
+    console.error('Failed to launch browser:', error);
+    process.exit(1);
+  }
+})();
 
 // Test route
 app.get('/test', (req, res) => {
   res.send('test worked!');
 });
 
-// Initialize the browser and page for rendering
-const startBrowser = async (url) => {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
-  const page = await browser.newPage();
-  await page.goto(url, { waitUntil: 'networkidle2' });
-
-  return { browser, page };
-};
-
-// Route to start browser session using GET arguments
+// Start a new session
 app.get('/start', async (req, res) => {
   const { url } = req.query;
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
   }
 
-  // Create a unique session ID for this client
-  const sessionId = uuidv4();
-  
-  const { browser, page } = await startBrowser(url);
-  
-  // Store the session for later use
-  sessions[sessionId] = { browser, page };
+  try {
+    // Generate a unique session ID
+    const sessionId = uuidv4();
 
-  res.json({ message: 'Browser session started', sessionId });
+    // Create a new page in the pre-launched browser
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: 'networkidle2' });
+
+    // Store session details
+    sessions[sessionId] = { page };
+
+    res.json({ message: 'Browser session started', sessionId });
+  } catch (error) {
+    console.error('Error starting session:', error);
+    res.status(500).json({ error: 'Failed to start session' });
+  }
 });
 
-// Route to fetch screenshot using GET method for a specific session
+// Fetch screenshot for a specific session
 app.get('/screenshot', async (req, res) => {
   const { sessionId } = req.query;
   if (!sessionId || !sessions[sessionId]) {
     return res.status(400).json({ error: 'Invalid session ID' });
   }
 
-  const { page } = sessions[sessionId];
-  const screenshot = await page.screenshot({ encoding: 'base64' });
-  res.json({ screenshot });
+  try {
+    const { page } = sessions[sessionId];
+    const screenshot = await page.screenshot({ encoding: 'base64' });
+    res.json({ screenshot });
+  } catch (error) {
+    console.error('Error taking screenshot:', error);
+    res.status(500).json({ error: 'Failed to take screenshot' });
+  }
 });
 
-// Route to handle mouse and keyboard inputs using POST method for a specific session
+// Handle user input for a specific session
 app.post('/input', async (req, res) => {
   const { sessionId, event, data } = req.body;
   if (!sessionId || !sessions[sessionId]) {
     return res.status(400).json({ error: 'Invalid session ID' });
   }
 
-  const { page } = sessions[sessionId];
+  try {
+    const { page } = sessions[sessionId];
 
-  if (event === 'mousemove') {
-    const { x, y } = data;
-    await page.mouse.move(x, y);
-  } else if (event === 'click') {
-    const { x, y } = data;
-    await page.mouse.click(x, y);
-  } else if (event === 'keydown') {
-    const { key } = data;
-    await page.keyboard.down(key);
-  } else if (event === 'keyup') {
-    const { key } = data;
-    await page.keyboard.up(key);
+    if (event === 'mousemove') {
+      const { x, y } = data;
+      await page.mouse.move(x, y);
+    } else if (event === 'click') {
+      const { x, y } = data;
+      await page.mouse.click(x, y);
+    } else if (event === 'keydown') {
+      const { key } = data;
+      await page.keyboard.down(key);
+    } else if (event === 'keyup') {
+      const { key } = data;
+      await page.keyboard.up(key);
+    }
+
+    res.json({ message: 'Input event processed' });
+  } catch (error) {
+    console.error('Error processing input:', error);
+    res.status(500).json({ error: 'Failed to process input' });
   }
-
-  res.json({ message: 'Input event processed' });
 });
 
-// Route to stop browser session for a specific session
-app.get('/stop', (req, res) => {
+// Stop a session
+app.get('/stop', async (req, res) => {
   const { sessionId } = req.query;
   if (!sessionId || !sessions[sessionId]) {
     return res.status(400).json({ error: 'Invalid session ID' });
   }
 
-  const { browser } = sessions[sessionId];
-  browser.close();
-  delete sessions[sessionId];
+  try {
+    const { page } = sessions[sessionId];
+    await page.close();
+    delete sessions[sessionId];
 
-  res.json({ message: 'Session closed' });
+    res.json({ message: 'Session stopped' });
+  } catch (error) {
+    console.error('Error stopping session:', error);
+    res.status(500).json({ error: 'Failed to stop session' });
+  }
 });
 
-// Start the Express server
+// Shutdown handler to close the browser
+process.on('SIGINT', async () => {
+  console.log('Closing browser...');
+  await browser.close();
+  console.log('Browser closed.');
+  process.exit(0);
+});
+
+// Start the server
 app.listen(PORT, () => {
-  console.log(`Server listening on https://localhost:${PORT}`);
+  console.log(`Server listening on http://localhost:${PORT}`);
 });
