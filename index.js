@@ -1,7 +1,7 @@
 const puppeteer = require('puppeteer');
 const express = require('express');
 const path = require('path');
-const { v4: uuidv4 } = require('unique-names-generator'); // To generate unique session IDs
+const { v4: uuidv4 } = require('uuid'); // To generate unique session IDs
 
 const app = express();
 const PORT = process.env.PORT || 3000;
