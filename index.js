@@ -1,14 +1,12 @@
 const puppeteer = require('puppeteer');
 const express = require('express');
-const bodyParser = require('body-parser');
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware to parse JSON requests
-app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, 'public'))); // Serve frontend files
+// Serve frontend files
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Test route
 app.get('/test', (req, res) => {
@@ -28,9 +26,9 @@ const startBrowser = async (url) => {
   await page.goto(url, { waitUntil: 'networkidle2' });
 };
 
-// POST API to start the browser session
-app.post('/start', async (req, res) => {
-  const { url } = req.body;
+// Route to start browser session using GET arguments
+app.get('/start', async (req, res) => {
+  const { url } = req.query;
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
   }
@@ -38,8 +36,8 @@ app.post('/start', async (req, res) => {
   res.json({ message: 'Browser session started' });
 });
 
-// POST API to get a screenshot
-app.post('/screenshot', async (req, res) => {
+// Route to fetch screenshot using GET method
+app.get('/screenshot', async (req, res) => {
   if (!page) {
     return res.status(400).json({ error: 'Browser session not started' });
   }
@@ -47,13 +45,13 @@ app.post('/screenshot', async (req, res) => {
   res.json({ screenshot });
 });
 
-// POST API to handle mouse events
+// Route to handle mouse and keyboard inputs using POST method
 app.post('/input', async (req, res) => {
+  const { event, data } = req.body;
   if (!page) {
     return res.status(400).json({ error: 'Browser session not started' });
   }
 
-  const { event, data } = req.body;
   if (event === 'mousemove') {
     const { x, y } = data;
     await page.mouse.move(x, y);
